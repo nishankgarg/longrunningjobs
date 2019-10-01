@@ -1,0 +1,194 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  onVideoUpload:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-onVideoUpload
+      Description: !Sub
+        - Stack ${StackTagName} Environment ${EnvironmentTagName} Function ${ResourceName}
+        - ResourceName: onVideoUpload
+      CodeUri: src/onVideoUpload
+      Handler: index.handler
+      Runtime: nodejs10.x
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - AWSXrayWriteOnlyAccess
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ecs:RunTask
+                - ecs:DescribeTasks
+                - ecs:StopTask
+              Resource:
+                - !Ref DockerTaskVideoThumbnail
+                - !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task/*
+        - Statement:
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource:
+                - !GetAtt DockerTaskVideoThumbnailExecutionRole.Arn
+                - !GetAtt DockerTaskVideoThumbnailTaskRole.Arn
+        - S3CrudPolicy:
+            BucketName: !Ref myflowsstore
+        - S3CrudPolicy:
+            BucketName: !Ref storeThumbnail
+      Events:
+        storeVideo:
+          Type: S3
+          Properties:
+            Bucket: !Ref storeVideo
+            Events:
+              - s3:ObjectCreated:*
+              - s3:ObjectRemoved:*
+      Environment:
+        Variables:
+          DOCKER_TASK_ARN: !Ref DockerTaskVideoThumbnail
+          DOCKER_TASK_SUBNETS: !Join
+            - ','
+            - !Ref DefaultVPCSubnets
+          BUCKET_NAME: !Ref myflowsstore
+          BUCKET_ARN: !GetAtt myflowsstore.Arn
+          BUCKET_NAME_2: !Ref storeThumbnail
+          BUCKET_ARN_2: !GetAtt storeThumbnail.Arn
+  onThumbnailUpload:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-onThumbnailUpload
+      Description: !Sub
+        - Stack ${StackTagName} Environment ${EnvironmentTagName} Function ${ResourceName}
+        - ResourceName: onThumbnailUpload
+      CodeUri: src/onThumbnailUpload
+      Handler: index.handler
+      Runtime: nodejs10.x
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - AWSXrayWriteOnlyAccess
+        - S3CrudPolicy:
+            BucketName: !Ref myflowsstore
+      Events:
+        storeThumbnail:
+          Type: S3
+          Properties:
+            Bucket: !Ref storeThumbnail
+            Events:
+              - s3:ObjectCreated:*
+              - s3:ObjectRemoved:*
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref myflowsstore
+          BUCKET_ARN: !GetAtt myflowsstore.Arn
+  storeVideo:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-storevide-${AWS::AccountId}
+  storeThumbnail:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-storethum-${AWS::AccountId}
+  myflowsstore:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-myflowsst-${AWS::AccountId}
+  DockerTaskVideoThumbnail:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+        - Image: 894996054489.dkr.ecr.us-east-1.amazonaws.com/fargaterepo:latest
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref DockerTaskVideoThumbnailLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: logs
+          Name: 0
+          Environment:
+            - Name: BUCKET_NAME
+              Value: !Ref storeThumbnail
+            - Name: BUCKET_ARN
+              Value: !GetAtt storeThumbnail.Arn
+      Cpu: 256
+      ExecutionRoleArn: !GetAtt DockerTaskVideoThumbnailExecutionRole.Arn
+      Memory: 512
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      TaskRoleArn: !GetAtt DockerTaskVideoThumbnailTaskRole.Arn
+      Volumes: []
+    DependsOn: DockerTaskVideoThumbnailLogGroup
+  DockerTaskVideoThumbnailExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-DockerTaskVid-execution
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: ecs-tasks.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DownloadDockerImagesFromECR
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:*:*:log-group:/stackery/task/${AWS::StackName}-*
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: '*'
+  DockerTaskVideoThumbnailTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-DockerTaskVideoThu-task
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: ecs-tasks.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AccessstoreThumbnail
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:GetLifecycleConfiguration
+                  - s3:PutLifecycleConfiguration
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::${storeThumbnail}
+                  - !Sub arn:${AWS::Partition}:s3:::${storeThumbnail}/*
+  DockerTaskVideoThumbnailLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /stackery/task/${AWS::StackName}-DockerTaskVideoThumbnail/logs
+Parameters:
+  StackTagName:
+    Type: String
+    Description: Stack Name (injected by Stackery at deployment time)
+  EnvironmentTagName:
+    Type: String
+    Description: Environment Name (injected by Stackery at deployment time)
+  DefaultVPCSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: AWS account-specific default VPC subnets (injected by Stackery at deployment time)
