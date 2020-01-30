@@ -7,7 +7,7 @@
   },
   "devDependencies": {
     "aws-sdk": "^2.538.0",
-    "node-red": "0.20.6",
+    "node-red": "0.20.8",
     "node-red-contrib-aws": "0.5.0",
     "node-red-contrib-aws-sdk": "^0.1.7",
     "node-red-contrib-aws-sdk-anything": "0.3.0",
